@@ -1,0 +1,6 @@
+{
+  "name": "Veera's Restaurant POS",
+  "description": "A mobile-friendly billing calculator and real-time sales analytics dashboard for Veera's Restaurant, featuring cash/online reports and interactive checkout.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
