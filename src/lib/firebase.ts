@@ -9,7 +9,7 @@ import {
   deleteDoc, 
   writeBatch 
 } from 'firebase/firestore';
-import { MenuItem, Order, DailyArchive } from '../types';
+import { MenuItem, Order, DailyArchive, Category } from '../types';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase App
@@ -72,8 +72,8 @@ export async function seedCloudDatabaseIfEmpty(
     const menuRef = doc(db, 'settings', 'menu');
     const menuSnap = await getDoc(menuRef);
     
-    if (!menuSnap.exists()) {
-      // Seed Menu Items
+    if (!menuSnap.exists() || !menuSnap.data()?.list?.some((it: any) => it.id === 'chk_hydrabadi')) {
+      // Seed or upgrade to Official Menu Items
       await setDoc(menuRef, cleanData({ list: defaultMenuItems }));
       
       // Seed Config
@@ -105,6 +105,10 @@ export async function fetchAllCloudData() {
     const menuSnap = await getDoc(doc(db, 'settings', 'menu'));
     const menuItems = menuSnap.exists() ? (menuSnap.data().list as MenuItem[]) : null;
 
+    // 1b. Fetch Categories
+    const catSnap = await getDoc(doc(db, 'settings', 'categories'));
+    const categories = catSnap.exists() ? (catSnap.data().list as Category[]) : null;
+
     // 2. Fetch Config
     const configSnap = await getDoc(doc(db, 'settings', 'config'));
     const config = configSnap.exists() ? (configSnap.data() as CloudConfig) : null;
@@ -129,6 +133,7 @@ export async function fetchAllCloudData() {
 
     return {
       menuItems,
+      categories,
       config,
       orders,
       dailyArchives
@@ -137,6 +142,14 @@ export async function fetchAllCloudData() {
     console.error('Error fetching cloud data:', error);
     throw error;
   }
+}
+
+/**
+ * Save categories to Firestore
+ */
+export async function saveCategoriesToCloud(categories: Category[]) {
+  const catRef = doc(db, 'settings', 'categories');
+  await setDoc(catRef, cleanData({ list: categories }));
 }
 
 /**

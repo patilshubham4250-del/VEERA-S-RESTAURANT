@@ -6,8 +6,8 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Banknote, CreditCard, ShoppingBag, TrendingUp, Calendar, Search, RefreshCw, Trash2, ArrowUpRight, Award, ChevronDown, ChevronUp, Download, Upload, CalendarDays, CheckCircle, Pencil, Lock, Plus, Minus, AlertCircle, X, ShieldCheck, PieChart, Activity, Layers, Utensils } from 'lucide-react';
-import { Order, PaymentMethod, DailyArchive } from '../types';
-import { DEFAULT_MENU_ITEMS } from '../data';
+import { Order, PaymentMethod, DailyArchive, Category } from '../types';
+import { DEFAULT_MENU_ITEMS, DEFAULT_CATEGORIES } from '../data';
 
 interface AnalyticsDashboardProps {
   orders: Order[];
@@ -24,6 +24,7 @@ interface AnalyticsDashboardProps {
   onEditOrder: (id: string, updatedOrder: Order, applyDateToAll?: boolean) => void;
   sessionBillingDate?: string | null;
   onSetSessionBillingDate?: (date: string | null) => void;
+  categories?: Category[];
 }
 
 export default function AnalyticsDashboard({
@@ -41,6 +42,7 @@ export default function AnalyticsDashboard({
   onEditOrder,
   sessionBillingDate,
   onSetSessionBillingDate,
+  categories = DEFAULT_CATEGORIES,
 }: AnalyticsDashboardProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -378,14 +380,11 @@ export default function AnalyticsDashboard({
       itemCategoryMap[item.name.toLowerCase()] = item.category;
     });
 
-    const categorySales: { [cat: string]: number } = {
-      'chicken_specials': 0,
-      'egg_specials': 0,
-      'soups': 0,
-      'veg_soyabean': 0,
-      'rice_noodles': 0,
-      'others': 0
-    };
+    const categorySales: { [cat: string]: number } = {};
+    categories.forEach(c => {
+      categorySales[c.id] = 0;
+    });
+    categorySales['others'] = 0;
 
     // Table Revenue mapping
     const tableRevenue: { [tbl: string]: { total: number; count: number } } = {};
@@ -410,7 +409,9 @@ export default function AnalyticsDashboard({
       o.items.forEach((item) => {
         dishSalesMap[item.name] = (dishSalesMap[item.name] || 0) + item.quantity;
 
-        const cat = itemCategoryMap[item.name.toLowerCase()] || 'others';
+        let cat = itemCategoryMap[item.name.toLowerCase()] || 'others';
+        if (cat === 'chicken_specials') cat = 'chicken_special';
+        if (cat === 'egg_specials') cat = 'egg_special';
         categorySales[cat] = (categorySales[cat] || 0) + (item.price * item.quantity);
       });
 
@@ -1044,45 +1045,39 @@ export default function AnalyticsDashboard({
                 const amtVal = amt as number;
                 const percent = stats.totalSales > 0 ? (amtVal / stats.totalSales) * 100 : 0;
                 
-                // Styles based on category
-                let label = 'Others';
-                let colorClass = 'bg-slate-500';
-                let textColor = 'text-slate-700';
-                let bgLight = 'bg-slate-50 border-slate-200';
-                
-                if (cat === 'chicken_specials') {
-                  label = 'Chicken Specials';
-                  colorClass = 'bg-orange-500';
-                  textColor = 'text-orange-800';
-                  bgLight = 'bg-orange-50/50 border-orange-100';
-                } else if (cat === 'egg_specials') {
-                  label = 'Egg Specials';
-                  colorClass = 'bg-amber-500';
-                  textColor = 'text-amber-800';
-                  bgLight = 'bg-amber-50/50 border-amber-100';
-                } else if (cat === 'soups') {
-                  label = 'Soups';
-                  colorClass = 'bg-blue-500';
-                  textColor = 'text-blue-800';
-                  bgLight = 'bg-blue-50/50 border-blue-100';
-                } else if (cat === 'veg_soyabean') {
-                  label = 'Veg & Soya Delights';
-                  colorClass = 'bg-emerald-500';
-                  textColor = 'text-emerald-800';
-                  bgLight = 'bg-emerald-50/50 border-emerald-100';
-                } else if (cat === 'rice_noodles') {
-                  label = 'Rice & Noodles';
-                  colorClass = 'bg-purple-500';
-                  textColor = 'text-purple-800';
-                  bgLight = 'bg-purple-50/50 border-purple-100';
-                }
+                const catObj = categories.find(c => c.id === cat);
+                const label = catObj ? catObj.name : cat === 'others' ? 'Others' : cat;
+
+                const categoryThemeMap: Record<string, { colorClass: string; bgLight: string; textColor: string }> = {
+                  chicken_special: { colorClass: 'bg-red-500', bgLight: 'bg-red-50/50 border-red-100', textColor: 'text-red-800' },
+                  mutton_special: { colorClass: 'bg-rose-700', bgLight: 'bg-rose-50/50 border-rose-100', textColor: 'text-rose-800' },
+                  veg_special: { colorClass: 'bg-emerald-600', bgLight: 'bg-emerald-50/50 border-emerald-100', textColor: 'text-emerald-800' },
+                  fish_special: { colorClass: 'bg-sky-500', bgLight: 'bg-sky-50/50 border-sky-100', textColor: 'text-sky-800' },
+                  rice: { colorClass: 'bg-amber-600', bgLight: 'bg-amber-50/50 border-amber-100', textColor: 'text-amber-800' },
+                  bread: { colorClass: 'bg-amber-700', bgLight: 'bg-amber-50/50 border-amber-100', textColor: 'text-amber-900' },
+                  papad: { colorClass: 'bg-yellow-500', bgLight: 'bg-yellow-50/50 border-yellow-100', textColor: 'text-yellow-800' },
+                  egg_special: { colorClass: 'bg-amber-500', bgLight: 'bg-amber-50/50 border-amber-100', textColor: 'text-amber-800' },
+                  veeras_special: { colorClass: 'bg-purple-600', bgLight: 'bg-purple-50/50 border-purple-100', textColor: 'text-purple-800' },
+                  ukad: { colorClass: 'bg-orange-600', bgLight: 'bg-orange-50/50 border-orange-100', textColor: 'text-orange-900' },
+                  chicken_chinese_special: { colorClass: 'bg-orange-500', bgLight: 'bg-orange-50/50 border-orange-100', textColor: 'text-orange-800' },
+                  soups: { colorClass: 'bg-blue-500', bgLight: 'bg-blue-50/50 border-blue-100', textColor: 'text-blue-800' },
+                  veg_soyabean: { colorClass: 'bg-teal-600', bgLight: 'bg-teal-50/50 border-teal-100', textColor: 'text-teal-800' },
+                  rice_noodles: { colorClass: 'bg-indigo-500', bgLight: 'bg-indigo-50/50 border-indigo-100', textColor: 'text-indigo-800' },
+                  beverages: { colorClass: 'bg-cyan-500', bgLight: 'bg-cyan-50/50 border-cyan-100', textColor: 'text-cyan-800' },
+                };
+
+                const theme = categoryThemeMap[cat] || {
+                  colorClass: 'bg-slate-500',
+                  bgLight: 'bg-slate-50 border-slate-200',
+                  textColor: 'text-slate-700'
+                };
 
                 if (amtVal === 0) return null; // Hide categories with 0 sales for a super-clean interface
 
                 return (
-                  <div key={cat} className={`p-2.5 rounded-xl border ${bgLight} flex flex-col gap-2 shadow-sm hover:shadow transition-shadow`}>
+                  <div key={cat} className={`p-2.5 rounded-xl border ${theme.bgLight} flex flex-col gap-2 shadow-sm hover:shadow transition-shadow`}>
                     <div className="flex justify-between items-center text-xs">
-                      <span className="font-extrabold text-[11px] uppercase tracking-wider">{label}</span>
+                      <span className={`font-extrabold text-[11px] uppercase tracking-wider ${theme.textColor}`}>{label}</span>
                       <span className="font-mono font-bold">
                         ₹{amtVal.toFixed(0)} <span className="text-slate-400">({percent.toFixed(0)}%)</span>
                       </span>
@@ -1090,7 +1085,7 @@ export default function AnalyticsDashboard({
                     {/* Visual progress bar */}
                     <div className="w-full bg-slate-200/50 h-1.5 rounded-full overflow-hidden">
                       <div 
-                        className={`h-full ${colorClass} transition-all duration-500`}
+                        className={`h-full ${theme.colorClass} transition-all duration-500`}
                         style={{ width: `${percent}%` }}
                       ></div>
                     </div>

@@ -5,8 +5,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { ChefHat, TrendingUp, Receipt, Layers, CreditCard, Banknote, Coffee, Clock, Calendar, Lock, X, ShieldCheck, AlertCircle, Cloud, CloudOff, RefreshCw, LogOut } from 'lucide-react';
-import { MenuItem, CartItem, Order, PaymentMethod, DailyArchive } from './types';
-import { DEFAULT_MENU_ITEMS, MOCK_ORDERS } from './data';
+import { MenuItem, CartItem, Order, PaymentMethod, DailyArchive, Category } from './types';
+import { DEFAULT_MENU_ITEMS, MOCK_ORDERS, normalizeMenuItems, DEFAULT_CATEGORIES } from './data';
 import BillCalculator from './components/BillCalculator';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import MenuManagement from './components/MenuManagement';
@@ -16,6 +16,7 @@ import {
   seedCloudDatabaseIfEmpty, 
   fetchAllCloudData, 
   saveMenuItemsToCloud, 
+  saveCategoriesToCloud,
   saveConfigToCloud, 
   saveOrderToCloud, 
   deleteOrderFromCloud, 
@@ -50,9 +51,14 @@ export default function App() {
   const [isInitialLoadDone, setIsInitialLoadDone] = useState<boolean>(false);
 
   // Load state from localStorage as an offline fallback
+  const [categories, setCategories] = useState<Category[]>(() => {
+    const saved = localStorage.getItem('veeras_categories_v1');
+    return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
+  });
+
   const [menuItems, setMenuItems] = useState<MenuItem[]>(() => {
-    const saved = localStorage.getItem('veeras_menu_items_v3');
-    return saved ? JSON.parse(saved) : DEFAULT_MENU_ITEMS;
+    const saved = localStorage.getItem('veeras_menu_items_v5');
+    return saved ? normalizeMenuItems(JSON.parse(saved)) : DEFAULT_MENU_ITEMS;
   });
 
   const [orders, setOrders] = useState<Order[]>(() => {
@@ -126,9 +132,16 @@ export default function App() {
       
       const data = await fetchAllCloudData();
       if (data) {
+        if (data.categories && data.categories.length > 0) {
+          setCategories(data.categories);
+          localStorage.setItem('veeras_categories_v1', JSON.stringify(data.categories));
+        } else {
+          saveCategoriesToCloud(DEFAULT_CATEGORIES);
+        }
         if (data.menuItems) {
-          setMenuItems(data.menuItems);
-          localStorage.setItem('veeras_menu_items_v3', JSON.stringify(data.menuItems));
+          const normalized = normalizeMenuItems(data.menuItems);
+          setMenuItems(normalized);
+          localStorage.setItem('veeras_menu_items_v5', JSON.stringify(normalized));
         }
         if (data.orders) {
           setOrders(data.orders);
@@ -173,7 +186,11 @@ export default function App() {
 
   // 2. Local Fallback Sync Effects (to keep localStorage synchronized)
   useEffect(() => {
-    localStorage.setItem('veeras_menu_items_v3', JSON.stringify(menuItems));
+    localStorage.setItem('veeras_categories_v1', JSON.stringify(categories));
+  }, [categories]);
+
+  useEffect(() => {
+    localStorage.setItem('veeras_menu_items_v5', JSON.stringify(menuItems));
   }, [menuItems]);
 
   useEffect(() => {
@@ -310,6 +327,81 @@ export default function App() {
     );
   };
 
+  // Category alterations
+  const handleAddCategory = (newCatData: { name: string; icon: string }) => {
+    const slug = newCatData.name.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/^_+|_+$/g, '');
+    const uniqueId = categories.some((c) => c.id === slug) ? `${slug}_${Date.now().toString().slice(-4)}` : slug;
+    const newCategory: Category = {
+      id: uniqueId,
+      name: newCatData.name.trim(),
+      icon: newCatData.icon || 'Utensils',
+    };
+    const updated = [...categories, newCategory];
+    setCategories(updated);
+    localStorage.setItem('veeras_categories_v1', JSON.stringify(updated));
+    syncToCloud(`Add Category: ${newCategory.name}`, () => saveCategoriesToCloud(updated));
+  };
+
+  const handleEditCategory = (id: string, updatedFields: { name: string; icon: string }) => {
+    const updated = categories.map((cat) => {
+      if (cat.id === id) {
+        return {
+          ...cat,
+          name: updatedFields.name.trim() || cat.name,
+          icon: updatedFields.icon || cat.icon,
+        };
+      }
+      return cat;
+    });
+    setCategories(updated);
+    localStorage.setItem('veeras_categories_v1', JSON.stringify(updated));
+    syncToCloud('Edit Category', () => saveCategoriesToCloud(updated));
+  };
+
+  const handleDeleteCategory = (id: string) => {
+    const catToDelete = categories.find((c) => c.id === id);
+    if (!catToDelete) return;
+
+    if (categories.length <= 1) {
+      alert('You cannot delete all categories. At least one category must remain.');
+      return;
+    }
+
+    const dishesInCategory = menuItems.filter((item) => item.category === id);
+    let confirmMsg = `Are you sure you want to delete the category "${catToDelete.name}"?`;
+    if (dishesInCategory.length > 0) {
+      confirmMsg += `\n\nNotice: ${dishesInCategory.length} dishes currently belong to this category. They will be reassigned to the "${categories.find(c => c.id !== id)?.name || 'Default'}" category.`;
+    }
+
+    if (window.confirm(confirmMsg)) {
+      const updatedCategories = categories.filter((c) => c.id !== id);
+      setCategories(updatedCategories);
+      localStorage.setItem('veeras_categories_v1', JSON.stringify(updatedCategories));
+      syncToCloud(`Delete Category: ${catToDelete.name}`, () => saveCategoriesToCloud(updatedCategories));
+
+      if (dishesInCategory.length > 0) {
+        const fallbackCat = updatedCategories[0].id;
+        const updatedDishes = menuItems.map((item) => {
+          if (item.category === id) {
+            return { ...item, category: fallbackCat };
+          }
+          return item;
+        });
+        setMenuItems(updatedDishes);
+        localStorage.setItem('veeras_menu_items_v5', JSON.stringify(updatedDishes));
+        syncToCloud('Reassign dishes from deleted category', () => saveMenuItemsToCloud(updatedDishes));
+      }
+    }
+  };
+
+  const handleResetCategoriesToDefault = () => {
+    if (window.confirm('Reset all categories back to default list?')) {
+      setCategories(DEFAULT_CATEGORIES);
+      localStorage.setItem('veeras_categories_v1', JSON.stringify(DEFAULT_CATEGORIES));
+      syncToCloud('Reset Categories to Default', () => saveCategoriesToCloud(DEFAULT_CATEGORIES));
+    }
+  };
+
   const handleDeleteOrder = (id: string) => {
     setOrders((prev) => prev.filter((order) => order.id !== id));
     syncToCloud('Delete Order', () => deleteOrderFromCloud(id));
@@ -347,7 +439,7 @@ export default function App() {
   };
 
   const handleResetMenuToDefault = () => {
-    if (window.confirm("Are you sure you want to restore the official Veera's Restaurant menu? This will replace your current catalog with the standard dishes from the menu card (including Chicken Specials, Egg Specials, Soups, Veg & Soyabean Delights, and Rice & Noodles). Your customized pricing or custom dishes will be overwritten.")) {
+    if (window.confirm("Are you sure you want to restore the official Veera's Restaurant menu with all 14 categories (Chicken Special, Mutton Special, Veg Special, Fish Special, Rice, Bread, Papad, Egg Special, Veera's Special, Ukad, Chicken Chinese Special, Soups, Veg & Soyabean Delights, and Rice & Noodles)? This will update your catalog with standard items.")) {
       setMenuItems(DEFAULT_MENU_ITEMS);
     }
   };
@@ -679,30 +771,30 @@ export default function App() {
       </div>
 
       {/* 2. MAIN BRAND HEADER SECTION */}
-      <header className="bg-white border-b border-slate-200 py-4 px-4 sm:px-6 shadow-sm sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+      <header className="bg-white border-b border-slate-200 py-2.5 px-3 sm:px-6 shadow-xs sticky top-0 z-30">
+        <div className="max-w-[1600px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-4">
           
           {/* Logo Brand info */}
-          <div className="flex items-center gap-3 self-start sm:self-center">
-            <div className="w-10 h-10 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-md">
-              <ChefHat className="w-5.5 h-5.5 stroke-[2.2]" />
+          <div className="flex items-center gap-2.5 self-start sm:self-center">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+              <ChefHat className="w-5 h-5 stroke-[2.2]" />
             </div>
             <div>
-              <h1 className="font-extrabold text-xl tracking-tight text-slate-900 leading-tight">VEERA'S RESTAURANT</h1>
-              <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-widest">Point of Sale & Analytics System</p>
+              <h1 className="font-extrabold text-base sm:text-lg tracking-tight text-slate-900 leading-tight">VEERA'S RESTAURANT</h1>
+              <p className="text-[9px] text-slate-500 uppercase font-semibold tracking-widest">Point of Sale & Analytics System</p>
             </div>
           </div>
 
           {/* Quick Real-time Today Sales Banner */}
-          <div className="flex items-center gap-5 bg-slate-50 rounded-xl px-4 py-2 border border-slate-200 self-stretch sm:self-auto justify-between">
+          <div className="flex items-center gap-4 bg-slate-50 rounded-xl px-3 py-1.5 border border-slate-200 self-stretch sm:self-auto justify-between">
             <div className="flex flex-col">
               <span className="text-[9px] text-slate-500 uppercase font-bold tracking-wider">Today's Sales (Real-time)</span>
-              <span className="text-sm font-black text-emerald-600 font-mono">₹{todaySalesTotal.toFixed(2)}</span>
+              <span className="text-xs sm:text-sm font-black text-emerald-600 font-mono">₹{todaySalesTotal.toFixed(2)}</span>
             </div>
-            <div className="h-7 w-px bg-slate-200"></div>
+            <div className="h-6 w-px bg-slate-200"></div>
             <div className="flex flex-col text-right">
               <span className="text-[9px] text-slate-500 uppercase font-bold tracking-wider">Invoices Raised</span>
-              <span className="text-sm font-bold text-slate-700 font-mono">
+              <span className="text-xs sm:text-sm font-bold text-slate-700 font-mono">
                 {orders.filter(o => {
                   const baseDate = sessionBillingDate ? new Date(sessionBillingDate) : new Date();
                   return new Date(o.timestamp).toDateString() === baseDate.toDateString();
@@ -715,8 +807,8 @@ export default function App() {
       </header>
 
       {/* 3. RESPONSIVE NAVIGATION CONTROL HUB */}
-      <div className="bg-white border-b border-slate-200 px-4">
-        <div className="max-w-7xl mx-auto flex">
+      <div className="bg-white border-b border-slate-200 px-3 sm:px-4">
+        <div className="max-w-[1600px] mx-auto flex">
           {[
             { id: 'billing', label: 'Billing Counter', icon: Receipt, activeColor: 'border-emerald-600 text-emerald-700 bg-emerald-50/50' },
             { id: 'analytics', label: 'Sales Analytics', icon: TrendingUp, activeColor: 'border-emerald-600 text-emerald-700 bg-emerald-50/50' },
@@ -729,13 +821,13 @@ export default function App() {
                 key={tab.id}
                 id={`nav-tab-${tab.id}`}
                 onClick={() => setActiveView(tab.id as any)}
-                className={`flex-1 sm:flex-initial py-3.5 px-4 sm:px-6 border-b-2 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                className={`flex-1 sm:flex-initial py-2.5 px-3 sm:px-6 border-b-2 font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                   isActive
-                    ? `${tab.activeColor} border-b-4 border-emerald-600`
+                    ? `${tab.activeColor} border-b-3 border-emerald-600`
                     : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50/50'
                 }`}
               >
-                <Icon className="w-4 h-4 shrink-0" />
+                <Icon className="w-3.5 h-3.5 shrink-0" />
                 {tab.label}
               </button>
             );
@@ -744,12 +836,13 @@ export default function App() {
       </div>
 
       {/* 4. MAIN CONTENT CONTAINER STAGE */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 pb-20">
+      <main className="flex-1 max-w-[1600px] w-full mx-auto p-2 sm:p-3 lg:p-4 pb-20 md:pb-4 flex flex-col">
         
         {/* Render Active View Panels */}
         {activeView === 'billing' && (
           <BillCalculator
             menuItems={menuItems}
+            categories={categories}
             cart={cart}
             setCart={setCart}
             discount={discount}
@@ -771,6 +864,7 @@ export default function App() {
         {activeView === 'analytics' && (
           <AnalyticsDashboard
             orders={orders}
+            categories={categories}
             dailyArchives={dailyArchives}
             onClearLogs={handleClearLogs}
             onResetMockLogs={handleResetMockLogs}
@@ -790,11 +884,16 @@ export default function App() {
         {activeView === 'menu' && (
           <MenuManagement
             menuItems={menuItems}
+            categories={categories}
             onAddMenuItem={handleAddMenuItem}
             onToggleAvailability={handleToggleAvailability}
             onDeleteMenuItem={handleDeleteMenuItem}
             onResetMenuToDefault={handleResetMenuToDefault}
             onEditMenuItem={handleEditMenuItem}
+            onAddCategory={handleAddCategory}
+            onEditCategory={handleEditCategory}
+            onDeleteCategory={handleDeleteCategory}
+            onResetCategoriesToDefault={handleResetCategoriesToDefault}
           />
         )}
 
