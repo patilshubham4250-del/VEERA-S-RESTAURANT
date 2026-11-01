@@ -45,6 +45,14 @@ export interface Category {
   icon: string; // Lucide icon name
 }
 
+export interface ArchiveItemSummary {
+  name: string;
+  quantity: number;
+  price: number;
+  revenue: number;
+  category?: string;
+}
+
 export interface DailyArchive {
   id: string;
   date: string;
@@ -54,4 +62,7 @@ export interface DailyArchive {
   billsCount: number;
   timestamp: string;
   orders?: Order[];
+  itemsSummary?: ArchiveItemSummary[];
+  notes?: string;
 }
+

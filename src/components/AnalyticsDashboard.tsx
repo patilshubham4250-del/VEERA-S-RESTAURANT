@@ -5,9 +5,48 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Banknote, CreditCard, ShoppingBag, TrendingUp, Calendar, Search, RefreshCw, Trash2, ArrowUpRight, Award, ChevronDown, ChevronUp, Download, Upload, CalendarDays, CheckCircle, Pencil, Lock, Plus, Minus, AlertCircle, X, ShieldCheck, PieChart, Activity, Layers, Utensils } from 'lucide-react';
-import { Order, PaymentMethod, DailyArchive, Category } from '../types';
+import { 
+  Banknote, 
+  CreditCard, 
+  ShoppingBag, 
+  TrendingUp, 
+  Calendar, 
+  Search, 
+  RefreshCw, 
+  Trash2, 
+  ArrowUpRight, 
+  ArrowDownRight,
+  Award, 
+  ChevronDown, 
+  ChevronUp, 
+  Download, 
+  Upload, 
+  CalendarDays, 
+  CheckCircle, 
+  Pencil, 
+  Lock, 
+  Plus, 
+  Minus, 
+  AlertCircle, 
+  X, 
+  ShieldCheck, 
+  PieChart, 
+  Activity, 
+  Layers, 
+  Utensils,
+  BarChart3,
+  BarChart2,
+  Sparkles,
+  FileText,
+  Sliders,
+  Scale,
+  Eye,
+  ArrowRight
+} from 'lucide-react';
+import { Order, PaymentMethod, DailyArchive, Category, MenuItem } from '../types';
 import { DEFAULT_MENU_ITEMS, DEFAULT_CATEGORIES } from '../data';
+import EditHistoricalArchiveModal from './EditHistoricalArchiveModal';
+import HistoricalDayAnalysisModal from './HistoricalDayAnalysisModal';
 
 interface AnalyticsDashboardProps {
   orders: Order[];
@@ -16,6 +55,8 @@ interface AnalyticsDashboardProps {
   onResetMockLogs: () => void;
   onCloseDay: () => void;
   onClearArchives: () => void;
+  onEditArchive?: (id: string, updatedArchive: DailyArchive) => void;
+  onDeleteArchive?: (id: string) => void;
   onExportBackup: () => void;
   onImportBackup: (jsonData: string) => boolean;
   autoBackup: boolean;
@@ -25,6 +66,7 @@ interface AnalyticsDashboardProps {
   sessionBillingDate?: string | null;
   onSetSessionBillingDate?: (date: string | null) => void;
   categories?: Category[];
+  menuItems?: MenuItem[];
 }
 
 export default function AnalyticsDashboard({
@@ -43,6 +85,9 @@ export default function AnalyticsDashboard({
   sessionBillingDate,
   onSetSessionBillingDate,
   categories = DEFAULT_CATEGORIES,
+  menuItems = DEFAULT_MENU_ITEMS,
+  onEditArchive,
+  onDeleteArchive,
 }: AnalyticsDashboardProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -64,6 +109,13 @@ export default function AnalyticsDashboard({
   const [filterPayment, setFilterPayment] = useState<'all' | 'CASH' | 'ONLINE'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
+
+  // Historical day editing & deep day analysis states
+  const [archiveToEdit, setArchiveToEdit] = useState<DailyArchive | null>(null);
+  const [archiveToAnalyze, setArchiveToAnalyze] = useState<DailyArchive | null>(null);
+  const [historicalViewMode, setHistoricalViewMode] = useState<'cards' | 'trends' | 'compare'>('cards');
+  const [compareDayAId, setCompareDayAId] = useState<string>('');
+  const [compareDayBId, setCompareDayBId] = useState<string>('');
 
   // Password Verification Modal state
   const [passwordModal, setPasswordModal] = useState<{
@@ -152,6 +204,115 @@ export default function AnalyticsDashboard({
     };
   }, [filteredArchivesByDate]);
 
+  // Multi-day trends analytics
+  const trendsData = useMemo(() => {
+    if (!filteredArchivesByDate || filteredArchivesByDate.length === 0) {
+      return null;
+    }
+    // Sort chronologically (oldest to newest) for chart
+    const chronological = [...filteredArchivesByDate].sort((a, b) => {
+      const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return timeA - timeB;
+    });
+
+    const totalRevenue = filteredArchivesByDate.reduce((sum, a) => sum + (a.totalSales || 0), 0);
+    const totalCash = filteredArchivesByDate.reduce((sum, a) => sum + (a.cashSales || 0), 0);
+    const totalOnline = filteredArchivesByDate.reduce((sum, a) => sum + (a.onlineSales || 0), 0);
+    const totalInvoices = filteredArchivesByDate.reduce((sum, a) => sum + (a.billsCount || 0), 0);
+    const avgDailyRevenue = filteredArchivesByDate.length > 0 ? totalRevenue / filteredArchivesByDate.length : 0;
+    const avgDailyBills = filteredArchivesByDate.length > 0 ? totalInvoices / filteredArchivesByDate.length : 0;
+
+    let peakDay = filteredArchivesByDate[0];
+    let lowestDay = filteredArchivesByDate[0];
+    filteredArchivesByDate.forEach((a) => {
+      if ((a.totalSales || 0) > (peakDay.totalSales || 0)) peakDay = a;
+      if ((a.totalSales || 0) < (lowestDay.totalSales || 0)) lowestDay = a;
+    });
+
+    // Day of week distribution (0 = Sun, 1 = Mon ... 6 = Sat)
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dowStats: { [dow: number]: { count: number; totalRevenue: number; totalBills: number } } = {
+      0: { count: 0, totalRevenue: 0, totalBills: 0 },
+      1: { count: 0, totalRevenue: 0, totalBills: 0 },
+      2: { count: 0, totalRevenue: 0, totalBills: 0 },
+      3: { count: 0, totalRevenue: 0, totalBills: 0 },
+      4: { count: 0, totalRevenue: 0, totalBills: 0 },
+      5: { count: 0, totalRevenue: 0, totalBills: 0 },
+      6: { count: 0, totalRevenue: 0, totalBills: 0 },
+    };
+
+    filteredArchivesByDate.forEach((a) => {
+      const d = a.timestamp ? new Date(a.timestamp) : new Date(a.date);
+      if (!isNaN(d.getTime())) {
+        const dow = d.getDay();
+        dowStats[dow].count += 1;
+        dowStats[dow].totalRevenue += a.totalSales || 0;
+        dowStats[dow].totalBills += a.billsCount || 0;
+      }
+    });
+
+    const dowList = [1, 2, 3, 4, 5, 6, 0].map((dow) => {
+      const item = dowStats[dow];
+      const avgRevenue = item.count > 0 ? item.totalRevenue / item.count : 0;
+      return {
+        dow,
+        name: dayNames[dow],
+        count: item.count,
+        totalRevenue: item.totalRevenue,
+        avgRevenue,
+        avgBills: item.count > 0 ? item.totalBills / item.count : 0,
+      };
+    });
+
+    const maxDayRevenue = Math.max(...chronological.map((d) => d.totalSales || 0), 100);
+
+    return {
+      chronological,
+      totalRevenue,
+      totalCash,
+      totalOnline,
+      totalInvoices,
+      avgDailyRevenue,
+      avgDailyBills,
+      peakDay,
+      lowestDay,
+      dowList,
+      maxDayRevenue,
+    };
+  }, [filteredArchivesByDate]);
+
+  // Comparison data between Day A and Day B
+  const comparisonData = useMemo(() => {
+    if (dailyArchives.length === 0) return null;
+    const dayA = dailyArchives.find((a) => a.id === compareDayAId) || filteredArchivesByDate[0] || dailyArchives[0] || null;
+    const dayB = dailyArchives.find((a) => a.id === compareDayBId) || (filteredArchivesByDate.length > 1 ? filteredArchivesByDate[1] : dailyArchives[0]) || null;
+
+    if (!dayA || !dayB) return null;
+
+    const revDiff = (dayB.totalSales || 0) - (dayA.totalSales || 0);
+    const revPct = dayA.totalSales > 0 ? (revDiff / dayA.totalSales) * 100 : 0;
+    const billsDiff = (dayB.billsCount || 0) - (dayA.billsCount || 0);
+    const aovA = dayA.billsCount > 0 ? dayA.totalSales / dayA.billsCount : 0;
+    const aovB = dayB.billsCount > 0 ? dayB.totalSales / dayB.billsCount : 0;
+    const aovDiff = aovB - aovA;
+    const cashShareA = dayA.totalSales > 0 ? (dayA.cashSales / dayA.totalSales) * 100 : 0;
+    const cashShareB = dayB.totalSales > 0 ? (dayB.cashSales / dayB.totalSales) * 100 : 0;
+
+    return {
+      dayA,
+      dayB,
+      revDiff,
+      revPct,
+      billsDiff,
+      aovA,
+      aovB,
+      aovDiff,
+      cashShareA,
+      cashShareB,
+    };
+  }, [compareDayAId, compareDayBId, dailyArchives, filteredArchivesByDate]);
+
   // Generate or retrieve orders for the selected archive
   const archiveOrders = useMemo(() => {
     if (!selectedArchive) return [];
@@ -212,7 +373,7 @@ export default function AnalyticsDashboard({
       });
     });
     
-    const sortedDishes = Object.entries(dishSalesMap)
+    let sortedDishes = Object.entries(dishSalesMap)
       .map(([name, data]) => ({
         name,
         quantity: data.quantity,
@@ -220,6 +381,15 @@ export default function AnalyticsDashboard({
         price: data.price
       }))
       .sort((a, b) => b.quantity - a.quantity);
+
+    if (selectedArchive.itemsSummary && selectedArchive.itemsSummary.length > 0) {
+      sortedDishes = selectedArchive.itemsSummary.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        revenue: item.revenue || item.price * item.quantity,
+        price: item.price
+      })).sort((a, b) => b.quantity - a.quantity);
+    }
       
     const averageBill = selectedArchive.billsCount > 0 ? selectedArchive.totalSales / selectedArchive.billsCount : 0;
     
@@ -737,143 +907,593 @@ export default function AnalyticsDashboard({
         </div>
       </div>
 
-      {/* COMPACT HISTORICAL CLOSURES LIST */}
+      {/* HISTORICAL DAY CLOSURES & ANALYTICAL HUB */}
       {dailyArchives.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-5 flex flex-col gap-4">
-          <div className="flex justify-between items-center flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <CalendarDays className="w-4.5 h-4.5 text-slate-500" />
-              <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wide">Historical Day Closures</h4>
+          <div className="flex justify-between items-center flex-wrap gap-3 pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700 flex items-center justify-center font-bold shrink-0">
+                <CalendarDays className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-extrabold text-slate-900 text-sm tracking-wide">Historical Day Closures & Analytics</h4>
+                  <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-bold">
+                    {dailyArchives.length} Recorded
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 font-medium">
+                  Complete shift archives: analyze dish yields & margins, edit past records, compare dates, and inspect bill ledger
+                </p>
+              </div>
             </div>
-            <button
-              onClick={onClearArchives}
-              className="text-[10px] text-red-500 hover:text-red-700 font-bold hover:underline cursor-pointer"
-            >
-              Clear Archives
-            </button>
-          </div>
 
-          {/* Date Range Picker inputs */}
-          <div className="flex flex-col sm:flex-row gap-3 items-end justify-between bg-slate-50 p-3 rounded-lg border border-slate-200/60">
-            <div className="grid grid-cols-2 gap-2.5 w-full sm:w-auto">
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">Start Date</label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">End Date</label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-              {(startDate || endDate) && (
+            {/* View Mode Switcher tabs */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80 text-xs font-bold text-slate-600">
+                <button
+                  type="button"
+                  onClick={() => setHistoricalViewMode('cards')}
+                  className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+                    historicalViewMode === 'cards'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'hover:text-slate-900 text-slate-600'
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  Day Records ({filteredArchivesByDate.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoricalViewMode('trends')}
+                  className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+                    historicalViewMode === 'trends'
+                      ? 'bg-white text-emerald-700 shadow-xs'
+                      : 'hover:text-slate-900 text-slate-600'
+                  }`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5" />
+                  Multi-Day Trends
+                </button>
                 <button
                   type="button"
                   onClick={() => {
-                    setStartDate('');
-                    setEndDate('');
+                    setHistoricalViewMode('compare');
+                    if (!compareDayAId && filteredArchivesByDate.length > 0) {
+                      setCompareDayAId(filteredArchivesByDate[0].id);
+                    }
+                    if (!compareDayBId && filteredArchivesByDate.length > 1) {
+                      setCompareDayBId(filteredArchivesByDate[1].id);
+                    }
                   }}
-                  className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                  className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+                    historicalViewMode === 'compare'
+                      ? 'bg-white text-blue-700 shadow-xs'
+                      : 'hover:text-slate-900 text-slate-600'
+                  }`}
                 >
-                  <X className="w-3.5 h-3.5" />
-                  Reset Range
+                  <Scale className="w-3.5 h-3.5" />
+                  Compare 2 Days
                 </button>
-              )}
+              </div>
+
+              <button
+                onClick={onClearArchives}
+                className="text-[10px] text-red-500 hover:text-red-700 font-bold hover:underline px-2 py-1 cursor-pointer"
+              >
+                Clear Archives
+              </button>
             </div>
           </div>
 
-          {/* Dynamic Range Summary Banner */}
-          {(startDate || endDate) && (
-            <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fadeIn">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-100 text-emerald-700 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
-                  <TrendingUp className="w-5 h-5" />
+          {/* VIEW MODE 1: DAY RECORDS (CARDS) */}
+          {historicalViewMode === 'cards' && (
+            <div className="flex flex-col gap-4">
+              {/* Date Range Picker inputs */}
+              <div className="flex flex-col sm:flex-row gap-3 items-end justify-between bg-slate-50 p-3 rounded-lg border border-slate-200/60">
+                <div className="grid grid-cols-2 gap-2.5 w-full sm:w-auto">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">Start Date</label>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">End Date</label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <h5 className="font-extrabold text-slate-800 text-xs uppercase tracking-wide">
-                    Range Reporting Summary
-                  </h5>
-                  <p className="text-[10px] text-slate-400 font-bold">
-                    From {startDate ? new Date(startDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'Beginning'} to {endDate ? new Date(endDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'Today'}
-                  </p>
+                
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                  {(startDate || endDate) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStartDate('');
+                        setEndDate('');
+                      }}
+                      className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Reset Range
+                    </button>
+                  )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs font-mono font-bold text-slate-600 w-full md:w-auto">
-                <div className="bg-white p-2 rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
-                  <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider font-sans">Total Sales</span>
-                  <span className="text-xs font-black text-slate-900 font-mono">₹{rangeStats.totalSales.toFixed(0)}</span>
+              {/* Dynamic Range Summary Banner */}
+              {(startDate || endDate) && (
+                <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fadeIn">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-emerald-100 text-emerald-700 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+                      <TrendingUp className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h5 className="font-extrabold text-slate-800 text-xs uppercase tracking-wide">
+                        Range Reporting Summary
+                      </h5>
+                      <p className="text-[10px] text-slate-400 font-bold">
+                        From {startDate ? new Date(startDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'Beginning'} to {endDate ? new Date(endDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'Today'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs font-mono font-bold text-slate-600 w-full md:w-auto">
+                    <div className="bg-white p-2 rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
+                      <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider font-sans">Total Sales</span>
+                      <span className="text-xs font-black text-slate-900 font-mono">₹{rangeStats.totalSales.toFixed(0)}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
+                      <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider font-sans">Cash Sales</span>
+                      <span className="text-xs font-black text-emerald-700 font-mono">₹{rangeStats.cashSales.toFixed(0)}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
+                      <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider font-sans">Online Sales</span>
+                      <span className="text-xs font-black text-slate-800 font-mono">₹{rangeStats.onlineSales.toFixed(0)}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
+                      <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider font-sans">Bills Count</span>
+                      <span className="text-xs font-black text-slate-900 font-mono">{rangeStats.billsCount}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
+                      <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider font-sans">Avg Bill</span>
+                      <span className="text-xs font-black text-slate-900 font-mono">₹{rangeStats.averageBill.toFixed(0)}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="bg-white p-2 rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
-                  <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider font-sans">Cash Sales</span>
-                  <span className="text-xs font-black text-emerald-700 font-mono">₹{rangeStats.cashSales.toFixed(0)}</span>
+              )}
+
+              {filteredArchivesByDate.length === 0 ? (
+                <div className="text-center py-10 text-slate-400 text-xs font-semibold">
+                  No historical day closures found within the selected date range.
                 </div>
-                <div className="bg-white p-2 rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
-                  <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider font-sans">Online Sales</span>
-                  <span className="text-xs font-black text-slate-800 font-mono">₹{rangeStats.onlineSales.toFixed(0)}</span>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 max-h-[460px] overflow-y-auto pr-1">
+                  {filteredArchivesByDate.map((archive) => {
+                    const cashPct = archive.totalSales > 0 ? (archive.cashSales / archive.totalSales) * 100 : 0;
+                    const onlinePct = archive.totalSales > 0 ? (archive.onlineSales / archive.totalSales) * 100 : 0;
+                    const aov = archive.billsCount > 0 ? archive.totalSales / archive.billsCount : 0;
+                    const itemsCount = archive.itemsSummary?.length || (archive.orders ? archive.orders.reduce((sum, o) => sum + o.items.length, 0) : null);
+
+                    return (
+                      <div 
+                        key={archive.id} 
+                        className="p-4 bg-slate-50 hover:bg-slate-100/70 rounded-xl border border-slate-200 hover:border-slate-300 transition-all text-xs flex flex-col gap-3 relative shadow-xs"
+                      >
+                        {/* Top: Date & badges */}
+                        <div className="flex justify-between items-start gap-2">
+                          <div>
+                            <span className="font-extrabold text-sm text-slate-900 block">{archive.date}</span>
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              <span className="text-[10px] bg-slate-200/80 text-slate-700 px-1.5 py-0.5 rounded font-mono font-bold">
+                                {archive.billsCount} Bills
+                              </span>
+                              {itemsCount !== null && (
+                                <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-mono font-bold">
+                                  {itemsCount} Dishes Sold
+                                </span>
+                              )}
+                              {archive.notes && (
+                                <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold truncate max-w-[140px]" title={archive.notes}>
+                                  📝 {archive.notes}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div className="text-right">
+                            <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wide block">Total Sales</span>
+                            <span className="text-base font-black text-slate-900 font-mono">
+                              ₹{archive.totalSales.toFixed(0)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Payment Breakdown & Mini Gauge */}
+                        <div className="bg-white p-2.5 rounded-lg border border-slate-200/60 flex flex-col gap-1.5">
+                          <div className="grid grid-cols-2 gap-1 font-mono text-[11px]">
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400 text-[10px] font-sans">Cash ({cashPct.toFixed(0)}%):</span>
+                              <span className="font-bold text-emerald-700">₹{archive.cashSales.toFixed(0)}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400 text-[10px] font-sans">Online ({onlinePct.toFixed(0)}%):</span>
+                              <span className="font-bold text-blue-700">₹{archive.onlineSales.toFixed(0)}</span>
+                            </div>
+                          </div>
+                          {/* Mini dual progress bar */}
+                          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden flex">
+                            <div style={{ width: `${cashPct}%` }} className="bg-emerald-500 h-full" title={`Cash: ${cashPct.toFixed(1)}%`} />
+                            <div style={{ width: `${onlinePct}%` }} className="bg-blue-500 h-full" title={`Online: ${onlinePct.toFixed(1)}%`} />
+                          </div>
+                          <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono pt-0.5">
+                            <span className="font-sans text-slate-400">Avg Ticket (AOV):</span>
+                            <span className="font-bold text-slate-700">₹{aov.toFixed(0)}</span>
+                          </div>
+                        </div>
+
+                        {/* Action buttons toolbar: Analyze, Edit, Invoices, Delete */}
+                        <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-200/70">
+                          <button
+                            type="button"
+                            onClick={() => setArchiveToAnalyze(archive)}
+                            className="py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs"
+                            title="Open detailed analytics, dish breakdown, and AI shift takeaways"
+                          >
+                            <BarChart2 className="w-3.5 h-3.5" />
+                            Analyze
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setArchiveToEdit(archive)}
+                            className="py-1.5 px-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs"
+                            title="Edit date, revenue numbers, notes, or itemized sold dishes"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            Edit
+                          </button>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedArchive(archive);
+                                setArchiveSearchQuery('');
+                                setArchiveFilterPayment('all');
+                                setExpandedArchiveInvoiceId(null);
+                              }}
+                              className="flex-1 py-1.5 px-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer"
+                              title="Audit individual bills and customer transactions"
+                            >
+                              <FileText className="w-3.5 h-3.5 text-slate-400" />
+                              Bills
+                            </button>
+
+                            {onDeleteArchive && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (window.confirm(`Are you sure you want to delete historical closure for ${archive.date}?`)) {
+                                    onDeleteArchive(archive.id);
+                                  }
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                title="Delete this day's closure record"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="bg-white p-2 rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
-                  <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider font-sans">Bills Count</span>
-                  <span className="text-xs font-black text-slate-900 font-mono">{rangeStats.billsCount}</span>
+              )}
+            </div>
+          )}
+
+          {/* VIEW MODE 2: MULTI-DAY TRENDS & INSIGHTS */}
+          {historicalViewMode === 'trends' && trendsData && (
+            <div className="flex flex-col gap-5 animate-fadeIn">
+              {/* Top Analytical Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wide">Historical Revenue</span>
+                  <div className="text-lg font-black text-slate-900 font-mono mt-0.5">
+                    ₹{trendsData.totalRevenue.toFixed(0)}
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-medium">Across {filteredArchivesByDate.length} recorded days</span>
                 </div>
-                <div className="bg-white p-2 rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
-                  <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider font-sans">Avg Bill</span>
-                  <span className="text-xs font-black text-slate-900 font-mono">₹{rangeStats.averageBill.toFixed(0)}</span>
+
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wide">Avg Daily Turnover</span>
+                  <div className="text-lg font-black text-emerald-700 font-mono mt-0.5">
+                    ₹{trendsData.avgDailyRevenue.toFixed(0)}
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-medium font-mono">~{trendsData.avgDailyBills.toFixed(1)} bills/day</span>
+                </div>
+
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wide">Best Grossing Day</span>
+                  <div className="text-lg font-black text-slate-900 font-mono mt-0.5">
+                    ₹{trendsData.peakDay.totalSales.toFixed(0)}
+                  </div>
+                  <span className="text-[10px] text-emerald-700 font-bold truncate block">
+                    {trendsData.peakDay.date}
+                  </span>
+                </div>
+
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wide">Payment Mix</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs font-black text-emerald-700 font-mono">
+                      Cash {trendsData.totalRevenue > 0 ? ((trendsData.totalCash / trendsData.totalRevenue) * 100).toFixed(0) : 0}%
+                    </span>
+                    <span className="text-slate-300">•</span>
+                    <span className="text-xs font-black text-blue-700 font-mono">
+                      Online {trendsData.totalRevenue > 0 ? ((trendsData.totalOnline / trendsData.totalRevenue) * 100).toFixed(0) : 0}%
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-medium">Total {trendsData.totalInvoices} customer invoices</span>
+                </div>
+              </div>
+
+              {/* Multi-day Stacked Bar Chart */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col gap-3">
+                <div className="flex justify-between items-center flex-wrap gap-2">
+                  <div>
+                    <h5 className="font-extrabold text-slate-900 text-xs uppercase tracking-wide">
+                      Multi-Day Revenue Trajectory
+                    </h5>
+                    <p className="text-[10px] text-slate-400">
+                      Chronological day-by-day revenue breakdown (click any bar to inspect deep analytics)
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs font-bold font-mono">
+                    <div className="flex items-center gap-1.5 text-emerald-700">
+                      <div className="w-3 h-3 bg-emerald-500 rounded-sm" />
+                      <span>Cash</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-blue-700">
+                      <div className="w-3 h-3 bg-blue-500 rounded-sm" />
+                      <span>Online (Card/UPI)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SVG Visual Representation */}
+                <div className="h-44 w-full flex items-end gap-2 pt-6 pb-2 border-b border-slate-200 overflow-x-auto">
+                  {trendsData.chronological.map((arch) => {
+                    const total = arch.totalSales || 0;
+                    const heightPct = Math.max(8, (total / trendsData.maxDayRevenue) * 100);
+                    const cashPct = total > 0 ? ((arch.cashSales || 0) / total) * 100 : 0;
+                    const onlinePct = 100 - cashPct;
+
+                    return (
+                      <div
+                        key={arch.id}
+                        onClick={() => setArchiveToAnalyze(arch)}
+                        className="flex-1 min-w-[56px] max-w-[90px] h-full flex flex-col justify-end items-center group cursor-pointer"
+                        title={`${arch.date}: ₹${total.toFixed(0)} (${arch.billsCount} bills). Click to analyze.`}
+                      >
+                        <span className="text-[10px] font-mono font-bold text-slate-700 group-hover:text-emerald-700 mb-1 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                          ₹{total.toFixed(0)}
+                        </span>
+                        <div
+                          style={{ height: `${heightPct}%` }}
+                          className="w-full rounded-t-md overflow-hidden flex flex-col-reverse group-hover:ring-2 ring-emerald-500 transition-all shadow-xs"
+                        >
+                          <div style={{ height: `${cashPct}%` }} className="bg-emerald-500 w-full" />
+                          <div style={{ height: `${onlinePct}%` }} className="bg-blue-500 w-full" />
+                        </div>
+                        <span className="text-[9px] font-bold text-slate-500 mt-1 truncate max-w-full text-center">
+                          {arch.date.split(',')[0]}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Day of the Week Sales Analysis */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col gap-3">
+                <div>
+                  <h5 className="font-extrabold text-slate-900 text-xs uppercase tracking-wide">
+                    Day-of-Week Turnover Analysis
+                  </h5>
+                  <p className="text-[10px] text-slate-400">
+                    Identify your restaurant's peak business weekdays vs slower preparation days
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-7 gap-2">
+                  {trendsData.dowList.map((dow) => {
+                    const isPeak = dow.avgRevenue > 0 && dow.avgRevenue === Math.max(...trendsData.dowList.map((d) => d.avgRevenue));
+                    return (
+                      <div
+                        key={dow.dow}
+                        className={`p-2.5 rounded-xl border flex flex-col gap-1 transition-all ${
+                          isPeak
+                            ? 'bg-emerald-50/80 border-emerald-300 ring-1 ring-emerald-300'
+                            : 'bg-white border-slate-200/80'
+                        }`}
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="font-extrabold text-xs text-slate-800">{dow.name.slice(0, 3)}</span>
+                          {isPeak && (
+                            <span className="text-[8px] bg-emerald-600 text-white font-black px-1 rounded uppercase">
+                              Peak
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm font-black text-slate-900 font-mono mt-0.5">
+                          ₹{dow.avgRevenue.toFixed(0)}
+                        </div>
+                        <div className="text-[9px] text-slate-400 font-medium">
+                          {dow.count} recorded {dow.count === 1 ? 'day' : 'days'}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
           )}
 
-          {filteredArchivesByDate.length === 0 ? (
-            <div className="text-center py-10 text-slate-400 text-xs font-semibold">
-              No historical day closures found within the selected date range.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[180px] overflow-y-auto pr-1">
-              {filteredArchivesByDate.map((archive) => (
-                <div 
-                  key={archive.id} 
-                  onClick={() => {
-                    setSelectedArchive(archive);
-                    setArchiveSearchQuery('');
-                    setArchiveFilterPayment('all');
-                    setExpandedArchiveInvoiceId(null);
-                  }}
-                  className="p-3 bg-slate-50 hover:bg-slate-100/90 rounded-lg border border-slate-200 hover:border-slate-300 transition-all text-xs cursor-pointer select-none group flex flex-col gap-1.5 active:scale-[0.985] relative"
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-slate-800 group-hover:text-emerald-700 transition-colors">{archive.date}</span>
-                    <span className="text-[10px] bg-slate-200/60 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold">
-                      {archive.billsCount} Bills
-                    </span>
+          {/* VIEW MODE 3: SIDE-BY-SIDE DAY COMPARISON */}
+          {historicalViewMode === 'compare' && (
+            <div className="flex flex-col gap-4 animate-fadeIn">
+              {/* Day Selectors */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    Select Baseline Day A
+                  </label>
+                  <select
+                    value={compareDayAId}
+                    onChange={(e) => setCompareDayAId(e.target.value)}
+                    className="p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                  >
+                    {dailyArchives.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.date} — ₹{a.totalSales.toFixed(0)} ({a.billsCount} bills)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-500" />
+                    Select Comparison Day B
+                  </label>
+                  <select
+                    value={compareDayBId}
+                    onChange={(e) => setCompareDayBId(e.target.value)}
+                    className="p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  >
+                    {dailyArchives.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.date} — ₹{a.totalSales.toFixed(0)} ({a.billsCount} bills)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {comparisonData ? (
+                <div className="flex flex-col gap-3">
+                  {/* Side by Side KPI Comparison Matrix */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {/* Revenue Delta */}
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col gap-2">
+                      <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">
+                        Total Revenue Comparison
+                      </span>
+                      <div className="flex justify-between items-baseline font-mono">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block font-sans">Day A:</span>
+                          <span className="text-base font-black text-slate-800">₹{comparisonData.dayA.totalSales.toFixed(0)}</span>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-slate-300" />
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 block font-sans">Day B:</span>
+                          <span className="text-base font-black text-slate-800">₹{comparisonData.dayB.totalSales.toFixed(0)}</span>
+                        </div>
+                      </div>
+                      <div className={`text-xs font-black font-mono px-2 py-1 rounded-md text-center ${
+                        comparisonData.revDiff >= 0
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-rose-50 text-rose-700 border border-rose-200'
+                      }`}>
+                        {comparisonData.revDiff >= 0 ? '+' : ''}₹{comparisonData.revDiff.toFixed(0)} ({comparisonData.revPct >= 0 ? '+' : ''}{comparisonData.revPct.toFixed(1)}%)
+                      </div>
+                    </div>
+
+                    {/* Bills / Customers Delta */}
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col gap-2">
+                      <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">
+                        Invoice Volume Comparison
+                      </span>
+                      <div className="flex justify-between items-baseline font-mono">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block font-sans">Day A:</span>
+                          <span className="text-base font-black text-slate-800">{comparisonData.dayA.billsCount} Bills</span>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-slate-300" />
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 block font-sans">Day B:</span>
+                          <span className="text-base font-black text-slate-800">{comparisonData.dayB.billsCount} Bills</span>
+                        </div>
+                      </div>
+                      <div className={`text-xs font-black font-mono px-2 py-1 rounded-md text-center ${
+                        comparisonData.billsDiff >= 0
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-rose-50 text-rose-700 border border-rose-200'
+                      }`}>
+                        {comparisonData.billsDiff >= 0 ? '+' : ''}{comparisonData.billsDiff} Invoices
+                      </div>
+                    </div>
+
+                    {/* Average Ticket (AOV) Delta */}
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col gap-2">
+                      <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">
+                        Avg Ticket (AOV) Comparison
+                      </span>
+                      <div className="flex justify-between items-baseline font-mono">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block font-sans">Day A:</span>
+                          <span className="text-base font-black text-slate-800">₹{comparisonData.aovA.toFixed(0)}</span>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-slate-300" />
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 block font-sans">Day B:</span>
+                          <span className="text-base font-black text-slate-800">₹{comparisonData.aovB.toFixed(0)}</span>
+                        </div>
+                      </div>
+                      <div className={`text-xs font-black font-mono px-2 py-1 rounded-md text-center ${
+                        comparisonData.aovDiff >= 0
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-rose-50 text-rose-700 border border-rose-200'
+                      }`}>
+                        {comparisonData.aovDiff >= 0 ? '+' : ''}₹{comparisonData.aovDiff.toFixed(0)} / order
+                      </div>
+                    </div>
                   </div>
-                  <div className="h-px bg-slate-200"></div>
-                  <div className="grid grid-cols-2 gap-1 font-mono text-[11px] text-slate-500">
-                    <span className="text-left">Cash:</span>
-                    <span className="text-right font-bold text-emerald-700">₹{archive.cashSales.toFixed(0)}</span>
-                    <span className="text-left">Online:</span>
-                    <span className="text-right font-bold text-slate-700">₹{archive.onlineSales.toFixed(0)}</span>
-                    <span className="text-left text-slate-800 font-bold">Total Sales:</span>
-                    <span className="text-right font-bold text-slate-900 flex items-center justify-end gap-1">
-                      ₹{archive.totalSales.toFixed(0)}
-                    </span>
-                  </div>
-                  <div className="text-[9px] text-slate-400 group-hover:text-emerald-600 text-right font-bold mt-0.5 transition-colors">
-                    Click to inspect details →
+
+                  {/* Quick Action buttons to open deep analytics for Day A or Day B */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setArchiveToAnalyze(comparisonData.dayA)}
+                      className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
+                    >
+                      <BarChart2 className="w-4 h-4" />
+                      Open Deep Analysis for {comparisonData.dayA.date}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setArchiveToAnalyze(comparisonData.dayB)}
+                      className="py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
+                    >
+                      <BarChart2 className="w-4 h-4" />
+                      Open Deep Analysis for {comparisonData.dayB.date}
+                    </button>
                   </div>
                 </div>
-              ))}
+              ) : null}
             </div>
           )}
         </div>
@@ -1682,13 +2302,31 @@ export default function AnalyticsDashboard({
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setSelectedArchive(null)}
-                className="text-slate-400 hover:text-white transition-colors cursor-pointer bg-slate-800/60 p-1.5 rounded-lg border border-slate-700/50"
-              >
-                <X className="w-4.5 h-4.5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setArchiveToAnalyze(selectedArchive)}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <BarChart2 className="w-3.5 h-3.5" />
+                  <span>Analyze Day</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setArchiveToEdit(selectedArchive)}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Edit Record</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedArchive(null)}
+                  className="text-slate-400 hover:text-white transition-colors cursor-pointer bg-slate-800/60 p-1.5 rounded-lg border border-slate-700/50"
+                >
+                  <X className="w-4.5 h-4.5" />
+                </button>
+              </div>
             </div>
 
             {/* Scrollable Body Container */}
@@ -1981,6 +2619,44 @@ export default function AnalyticsDashboard({
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL: Full Edit of Historical Day Closure */}
+      {archiveToEdit && (
+        <EditHistoricalArchiveModal
+          archive={archiveToEdit}
+          categories={categories}
+          menuItems={menuItems}
+          onClose={() => setArchiveToEdit(null)}
+          onSave={(updated) => {
+            if (onEditArchive) {
+              onEditArchive(archiveToEdit.id, updated);
+            }
+            if (selectedArchive?.id === archiveToEdit.id) {
+              setSelectedArchive(updated);
+            }
+            if (archiveToAnalyze?.id === archiveToEdit.id) {
+              setArchiveToAnalyze(updated);
+            }
+            setArchiveToEdit(null);
+          }}
+        />
+      )}
+
+      {/* MODAL: Deep Historical Day Analysis */}
+      {archiveToAnalyze && (
+        <HistoricalDayAnalysisModal
+          archive={archiveToAnalyze}
+          allArchives={dailyArchives}
+          categories={categories}
+          menuItems={menuItems}
+          onClose={() => setArchiveToAnalyze(null)}
+          onEdit={() => {
+            const target = archiveToAnalyze;
+            setArchiveToAnalyze(null);
+            setArchiveToEdit(target);
+          }}
+        />
       )}
 
     </div>

@@ -528,6 +528,24 @@ export default function App() {
     alert(`Daily Shift Closed successfully! ${autoBackup ? "An automatic backup file has been downloaded to your device." : ""} Active sales counters have been reset to zero for the new day.`);
   };
 
+  const handleEditArchive = (id: string, updatedArchive: DailyArchive) => {
+    setDailyArchives((prev) =>
+      prev.map((a) => (a.id === id ? updatedArchive : a))
+    );
+    syncToCloud(`Update Archive ${updatedArchive.date}`, () =>
+      saveArchiveToCloud(updatedArchive)
+    );
+  };
+
+  const handleDeleteArchive = (id: string) => {
+    const target = dailyArchives.find((a) => a.id === id);
+    if (!target) return;
+    if (window.confirm(`Are you sure you want to delete the historical closure for ${target.date}? This cannot be undone.`)) {
+      setDailyArchives((prev) => prev.filter((a) => a.id !== id));
+      syncToCloud(`Delete Archive ${target.date}`, () => deleteArchiveFromCloud(id));
+    }
+  };
+
   const handleClearArchives = () => {
     if (window.confirm('Are you sure you want to delete ALL historical daily archive logs? This cannot be undone.')) {
       const archiveIds = dailyArchives.map(a => a.id);
@@ -865,11 +883,14 @@ export default function App() {
           <AnalyticsDashboard
             orders={orders}
             categories={categories}
+            menuItems={menuItems}
             dailyArchives={dailyArchives}
             onClearLogs={handleClearLogs}
             onResetMockLogs={handleResetMockLogs}
             onCloseDay={handleCloseDay}
             onClearArchives={handleClearArchives}
+            onEditArchive={handleEditArchive}
+            onDeleteArchive={handleDeleteArchive}
             onExportBackup={handleExportBackup}
             onImportBackup={handleImportBackup}
             autoBackup={autoBackup}
